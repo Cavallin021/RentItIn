@@ -6,7 +6,7 @@ import { CreateTransactionDto } from './dto/create-transaction.dto';
 
 @Injectable()
 export class FinanceService {
-  private spreadsheetId = '1P8oAcZ_32lVis3eMbURHv2syiuOe3K4iklBwbD1bSaU';
+  private spreadsheetId = process.env.SHEET_ID;
 
   private async getSheetsInstance() {
     const jsonString = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
