@@ -38,7 +38,7 @@ export class FinanceService {
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
-      range: 'A2:Z2',
+      range: 'A3:Z3',
     });
 
     const primeiraLinha = response.data.values?.[0];
@@ -59,7 +59,7 @@ export class FinanceService {
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
-      range: 'A1:Z1',
+      range: 'A2:Z2',
     });
 
     const primeiraLinha = response.data.values?.[0];
@@ -111,7 +111,7 @@ export class FinanceService {
     for (let i = 0; i < numParcelas; i++) {
       const nomeParcelado =
         numParcelas > 1 ? `${dto.name} (${i + 1}/${numParcelas})` : dto.name;
-      const valorParcelado = dto.valor / numParcelas;
+      const valorParcelado = dto.valor;
 
       // Atualiza Nome (na mesma linha)
       await sheets.spreadsheets.values.update({
