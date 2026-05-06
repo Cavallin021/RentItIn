@@ -29,41 +29,107 @@ export class FinanceService {
     return google.sheets({ version: 'v4', auth: authClient });
   }
 
-  async getValorMes() {
+  async getValorMes(numeroMes: number) {
     function converterParaNumero(valorString: string): number {
       const apenasNumeros = valorString.replace(/[^\d-]/g, '');
-      return parseFloat(apenasNumeros) / 100;
+      return parseFloat(apenasNumeros) / 100 || 0;
     }
-
-    const dataAtual: Date = new Date();
-    // getMonth() retorna 0-11, somamos 1 para ter 1-12
-    const numeroMes: number = dataAtual.getMonth() + 1;
     const sheets = await this.getSheetsInstance();
 
-    // Supondo que seu range cubra pelo menos até a coluna do mês desejado
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
       range: 'A2:Z2',
     });
 
-    const row = response.data.values ? response.data.values[0] : [];
+    const primeiraLinha = response.data.values?.[0];
 
-    const total = converterParaNumero(row[numeroMes - 1]);
+    const total = primeiraLinha
+      ? primeiraLinha.map((item) => converterParaNumero(item))
+      : [];
+
+    return { total };
+  }
+
+  async getValorMesLC(numeroMes: number) {
+    function converterParaNumero(valorString: string): number {
+      const apenasNumeros = valorString.replace(/[^\d-]/g, '');
+      return parseFloat(apenasNumeros) / 100;
+    }
+    const sheets = await this.getSheetsInstance();
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: 'A1:Z1',
+    });
+
+    const primeiraLinha = response.data.values?.[0];
+
+    const total = primeiraLinha
+      ? primeiraLinha.map((item) => converterParaNumero(item))
+      : [];
 
     return { total };
   }
 
   async adicionarItem(dto: CreateTransactionDto) {
     const sheets = await this.getSheetsInstance();
+    const getLetra = (num: number) => {
+      let letra = '',
+        n = num;
+      while (n > 0) {
+        n--;
+        letra = String.fromCharCode(65 + (n % 26)) + letra;
+        n = Math.floor(n / 26);
+      }
+      return letra;
+    };
 
-    await sheets.spreadsheets.values.append({
+    const aba = dto.categoria.trim();
+    const numParcelas = dto.parcelas && dto.parcelas > 0 ? dto.parcelas : 1;
+
+    // Coluna de Valores do grupo (ex: 2, 4, 6...)
+    const colValor = dto.grupoColuna * 2;
+    const letraColValor = getLetra(colValor);
+
+    // 1. Lemos APENAS a coluna de valores para achar a última linha
+    const rangeBusca = `'${aba}'!${letraColValor}1:${letraColValor}1000`;
+    const response = await sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
-      range: 'A2',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: [[dto.name, dto.valor, dto.categoria]],
-      },
+      range: rangeBusca,
     });
+
+    // 2. A primeira linha livre será o tamanho do array + 1
+    const rows = response.data.values ? response.data.values.length : 0;
+    const linhaAlvo = rows + 1;
+
+    // 3. Cálculo da coluna de Nomes (coluna vizinha à esquerda do valor)
+    const colName = colValor - 1;
+
+    // 4. Preenchimento horizontal na linha alvo
+    let colAtual = colName;
+
+    for (let i = 0; i < numParcelas; i++) {
+      const nomeParcelado =
+        numParcelas > 1 ? `${dto.name} (${i + 1}/${numParcelas})` : dto.name;
+      const valorParcelado = dto.valor / numParcelas;
+
+      // Atualiza Nome (na mesma linha)
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range: `'${aba}'!${getLetra(colAtual)}${linhaAlvo}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [[nomeParcelado || '']] },
+      });
+
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range: `'${aba}'!${getLetra(colAtual + 1)}${linhaAlvo}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [[valorParcelado]] },
+      });
+
+      colAtual += 2;
+    }
 
     return { success: true };
   }
