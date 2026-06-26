@@ -166,8 +166,16 @@ export class FinanceService {
           const valorRaw = row[1];
           if (!name || !valorRaw) return null;
 
-          const apenasNumeros = valorRaw.replace(/[^\d-]/g, '');
-          const valor = parseFloat(apenasNumeros) / 100 || 0;
+          let clean = valorRaw.replace(/R\$\s?/g, '').trim();
+          if (clean.includes(',')) {
+            clean = clean.replace(/\./g, '').replace(',', '.');
+          } else {
+            const dotCount = (clean.match(/\./g) || []).length;
+            if (dotCount > 1) {
+              clean = clean.replace(/\./g, '');
+            }
+          }
+          const valor = parseFloat(clean) || 0;
 
           return { name, valor };
         })
