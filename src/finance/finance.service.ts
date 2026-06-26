@@ -133,4 +133,49 @@ export class FinanceService {
 
     return { success: true };
   }
+
+  async getRecentes(numeroMes: number, categoria: string) {
+    const sheets = await this.getSheetsInstance();
+    const getLetra = (num: number) => {
+      let letra = '',
+        n = num;
+      while (n > 0) {
+        n--;
+        letra = String.fromCharCode(65 + (n % 26)) + letra;
+        n = Math.floor(n / 26);
+      }
+      return letra;
+    };
+
+    const aba = categoria.trim();
+    const colValor = numeroMes * 2;
+    const colName = colValor - 1;
+
+    const rangeBusca = `'${aba}'!${getLetra(colName)}4:${getLetra(colValor)}1000`;
+
+    try {
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: this.spreadsheetId,
+        range: rangeBusca,
+      });
+
+      const rows = response.data.values || [];
+      const transacoes = rows
+        .map((row) => {
+          const name = row[0];
+          const valorRaw = row[1];
+          if (!name || !valorRaw) return null;
+
+          const apenasNumeros = valorRaw.replace(/[^\d-]/g, '');
+          const valor = parseFloat(apenasNumeros) / 100 || 0;
+
+          return { name, valor };
+        })
+        .filter((item) => item !== null);
+
+      return transacoes.slice(-5).reverse();
+    } catch (error) {
+      return [];
+    }
+  }
 }
