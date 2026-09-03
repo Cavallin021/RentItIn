@@ -1,0 +1,8 @@
+node_modules/
+.env
+dist/
+.expo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+apprentitin*.json

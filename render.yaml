@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: rentitin-backend
+    env: node
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:prod
+    envVars:
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false
+      - key: SHEET_ID
+        sync: false
