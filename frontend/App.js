@@ -9,9 +9,19 @@ import { Picker } from "@react-native-picker/picker";
 import { STORAGE_KEYS } from "./constants";
 import axios from "axios";
 
-const API_URL = "http://192.168.15.20:3000/finance";
+const API_URL = "https://rentitin-api.onrender.com/finance"
+// const API_URL = "http://192.168.15.20:3000/finance";
 const Meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const CLOSING_DAY = 28;
+
+const formatCurrency = (value) => {
+  if (value === undefined || value === null) return "0,00";
+  const num = parseFloat(value);
+  if (isNaN(num)) return "0,00";
+  const parts = num.toFixed(2).split(".");
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return parts.join(",");
+};
 
 export const AppContext = createContext();
 
@@ -76,7 +86,7 @@ function DashboardScreen() {
       ) : (
         <ScrollView contentContainerStyle={styles.containerCaixas} showsVerticalScrollIndicator={false}>
           <Image source={require("./assets/banner.png")} style={styles.imagem} />
-          
+
           <View style={styles.seletoresCaixas}>
             <TouchableOpacity style={[styles.buttonDate, { backgroundColor: isDark ? "#1E1E24" : "#ffffff", borderColor: isDark ? "#2D3748" : "#ccc", opacity: mesesDisponiveis.length === 0 || mesesDisponiveis.indexOf(seletorMes) <= 0 ? 0.3 : 1 }]} onPress={handlePrevMonth} disabled={mesesDisponiveis.length === 0 || mesesDisponiveis.indexOf(seletorMes) <= 0}>
               <Image source={require("./assets/left.png")} style={[styles.imagemButtons, { tintColor: isDark ? "#FFFFFF" : "#1A1A1A" }]} />
@@ -89,12 +99,12 @@ function DashboardScreen() {
 
           <View style={[styles.caixa, { backgroundColor: isDark ? "#1E1E24" : "#ffffff", borderColor: isDark ? "#2D3748" : "#ccc" }]}>
             <Text style={[styles.totalText, { color: total[seletorMes] <= 0 ? (isDark ? "#FF4D4D" : "#D63031") : (isDark ? "#2ECC71" : "#27AE60") }]}>Total</Text>
-            <Text style={[styles.totalText, { color: total[seletorMes] <= 0 ? (isDark ? "#FF4D4D" : "#D63031") : (isDark ? "#2ECC71" : "#27AE60") }]}>R$ {total[seletorMes] || 0}</Text>
+            <Text style={[styles.totalText, { color: total[seletorMes] <= 0 ? (isDark ? "#FF4D4D" : "#D63031") : (isDark ? "#2ECC71" : "#27AE60") }]}>R$ {formatCurrency(total[seletorMes])}</Text>
           </View>
-          
+
           <View style={[styles.caixa, { backgroundColor: isDark ? "#1E1E24" : "#ffffff", borderColor: isDark ? "#2D3748" : "#ccc" }]}>
             <Text style={[styles.totalText, { color: isDark ? "#FF4D4D" : "#D63031" }]}>CRÉDITO</Text>
-            <Text style={[styles.totalText, { color: isDark ? "#FF4D4D" : "#D63031" }]}>R$ {totalLC[seletorMes] || 0}</Text>
+            <Text style={[styles.totalText, { color: isDark ? "#FF4D4D" : "#D63031" }]}>R$ {formatCurrency(totalLC[seletorMes])}</Text>
           </View>
 
           {!loading && (
@@ -127,7 +137,7 @@ function DashboardScreen() {
               <Picker.Item label="Débito" value="Débito" style={{ color: isDark ? '#FFFFFF' : '#1A1A1A', backgroundColor: isDark ? '#121214' : '#FFFFFF' }} />
             </Picker>
           </View>
-          
+
           <Text style={{ color: isDark ? "#FFFFFF" : "#1A1A1A", marginTop: 10, fontWeight: "bold" }}>Mês:</Text>
           <View style={{ borderRadius: 8, borderWidth: 1, borderColor: isDark ? "#2D3748" : "#ccc", overflow: 'hidden', marginTop: 5, backgroundColor: isDark ? '#121214' : '#FFFFFF' }}>
             <Picker selectedValue={grupoColuna} onValueChange={setGrupoColuna} style={{ color: isDark ? '#FFFFFF' : '#1A1A1A', backgroundColor: isDark ? '#121214' : '#FFFFFF' }} dropdownIconColor={isDark ? '#FFFFFF' : '#1A1A1A'}>
@@ -239,7 +249,7 @@ function LancamentosMesScreen() {
       <Text style={{ fontSize: 22, fontWeight: 'bold', color: isDark ? '#FFFFFF' : '#1A1A1A', marginBottom: 15, textAlign: 'center' }}>
         Lançamentos de {Meses[seletorMes - 1]}
       </Text>
-      
+
       <TextInput
         style={[styles.input, { backgroundColor: isDark ? '#1E1E24' : '#FFFFFF', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: isDark ? '#2D3748' : '#ccc', color: isDark ? '#FFFFFF' : '#1A1A1A', marginBottom: 15 }]}
         placeholder="Pesquisar por nome ou valor..."
@@ -265,7 +275,7 @@ function LancamentosMesScreen() {
                   <View style={{ alignItems: 'flex-end', flexDirection: 'row', gap: 15 }}>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={{ fontWeight: 'bold', color: t.categoria === 'Crédito' ? (isDark ? '#FF4D4D' : '#D63031') : (isDark ? '#2ECC71' : '#27AE60'), fontSize: 16 }}>
-                        R$ {t.valor.toFixed(2)}
+                        R$ {formatCurrency(t.valor)}
                       </Text>
                       <Text style={{ fontSize: 11, color: isDark ? '#A0AEC0' : '#636E72' }}>{t.categoria}</Text>
                     </View>
@@ -324,7 +334,7 @@ function RecentesScreen() {
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={{ fontWeight: 'bold', color: t.categoria === 'Crédito' ? (isDark ? '#FF4D4D' : '#D63031') : (isDark ? '#2ECC71' : '#27AE60'), fontSize: 16 }}>
-                      R$ {t.valor.toFixed(2)}
+                      R$ {formatCurrency(t.valor)}
                     </Text>
                     <Text style={{ fontSize: 11, color: isDark ? '#A0AEC0' : '#636E72' }}>{t.categoria}</Text>
                   </View>
@@ -374,7 +384,7 @@ function LimpezaScreen({ navigation }) {
         <Text style={{ fontSize: 22, fontWeight: 'bold', marginBottom: 15, color: isDark ? '#FFFFFF' : '#1A1A1A', textAlign: 'center' }}>
           🧹 Limpar aba de {Meses[mesAlvo - 1]}?
         </Text>
-        
+
         <Text style={{ color: isDark ? '#A0AEC0' : '#636E72', marginBottom: 20, textAlign: 'center', lineHeight: 22 }}>
           Essa ação irá excluir os lançamentos antigos desta aba. Parcelas em andamento que vencem neste ano ou no próximo serão mantidas intactas. Requer senha administrativa.
         </Text>
