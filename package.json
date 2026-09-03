@@ -7,7 +7,8 @@
     "start:frontend": "cd frontend && npm start",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
     "build": "cd backend && npm install && npm run build",
-    "start": "cd backend && npm run start:prod"
+    "start": "cd backend && npm run start:prod",
+    "start:prod": "cd backend && npm run start:prod"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
