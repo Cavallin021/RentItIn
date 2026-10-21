@@ -1,0 +1,42 @@
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { FinanceService } from './finance.service';
+import { CreateTransactionDto } from './dto/create-transaction.dto';
+
+@Controller('finance')
+export class FinanceController {
+  constructor(private readonly financeService: FinanceService) {}
+
+  @Get('total')
+  async getTotal(@Query('mes') mes: string) {
+    const numeroMes = parseInt(mes, 10);
+    return await this.financeService.getValorMes(numeroMes);
+  }
+
+  @Get('total/LC')
+  async getTotalLC(@Query('mes') mes: string) {
+    const numeroMes = parseInt(mes, 10);
+    return await this.financeService.getValorMesLC(numeroMes);
+  }
+
+  @Post('adicionar')
+  async adicionar(@Body() dto: CreateTransactionDto) {
+    return await this.financeService.adicionarItem(dto);
+  }
+
+  @Get('meses-disponiveis')
+  getMesesDisponiveis() {
+    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+  }
+
+  @Get('recentes')
+  async getRecentes(
+    @Query('mes') mes?: string,
+    @Query('categoria') categoria?: string,
+  ) {
+    if (!mes || !categoria) {
+      return [];
+    }
+    const numeroMes = parseInt(mes, 10);
+    return await this.financeService.getRecentes(numeroMes, categoria);
+  }
+}

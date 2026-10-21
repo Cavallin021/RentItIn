@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Rent It In",
+    "slug": "frontend-financas",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F9F7F2"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#F9F7F2"
+      },
+      "package": "com.cavallin021.frontendfinancas"
+    },
+    "web": {
+      "favicon": "./assets/icon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "b9ffe51e-83ed-4502-966f-75b543dd8302"
+      }
+    }
+  }
+}

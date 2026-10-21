@@ -1,0 +1,12 @@
+{
+  "name": "reinitin-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "cd rein-it-in && npm install && npm run build",
+    "start": "cd rein-it-in && npm run start:prod",
+    "start:prod": "cd rein-it-in && npm run start:prod",
+    "start:backend": "cd rein-it-in && npm run start:dev",
+    "start:frontend": "cd frontend-financas && npm start"
+  }
+}
