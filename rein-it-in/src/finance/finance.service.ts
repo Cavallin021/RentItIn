@@ -132,6 +132,173 @@ export class FinanceService {
     return { success: true };
   }
 
+  private async getSheetId(
+    sheets: Awaited<ReturnType<FinanceService['getSheetsInstance']>>,
+    aba: string,
+  ): Promise<number | null> {
+    const meta = await sheets.spreadsheets.get({
+      spreadsheetId: this.spreadsheetId,
+      fields: 'sheets.properties(sheetId,title)',
+    });
+    const sheet = (meta.data.sheets || []).find(
+      (s) => s.properties?.title === aba,
+    );
+    return sheet?.properties?.sheetId ?? null;
+  }
+
+  private async excluirLinha(
+    sheets: Awaited<ReturnType<FinanceService['getSheetsInstance']>>,
+    sheetId: number,
+    rowIndex: number,
+  ) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: this.spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            deleteDimension: {
+              range: {
+                sheetId,
+                dimension: 'ROWS',
+                startIndex: rowIndex - 1, // 0-based
+                endIndex: rowIndex,
+              },
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  // Exclui a linha `rowIndex` da aba do mês. Só exclui se o nome da linha
+  // ainda for o mesmo (protege contra a planilha ter mudado desde a listagem).
+  // Com `todasParcelas`, também exclui as outras parcelas nos outros meses.
+  async removerItem(
+    mes: number,
+    rowIndex: number,
+    nome: string,
+    todasParcelas = false,
+  ) {
+    const aba = this.MONTH_NAMES[mes];
+    if (!aba) throw new Error('Mês inválido');
+    if (!rowIndex || rowIndex < 2) throw new Error('Linha inválida');
+
+    const sheets = await this.getSheetsInstance();
+
+    const atual = await sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: `'${aba}'!A${rowIndex}:E${rowIndex}`,
+    });
+    const nomeNaLinha = atual.data.values?.[0]?.[0];
+    if (nomeNaLinha !== nome) {
+      throw new Error(
+        'A planilha mudou desde a última atualização. Atualize e tente novamente.',
+      );
+    }
+
+    // Outras parcelas ("Nome (k/N)") em outros meses
+    const match = nome.match(/^(.*) \((\d+)\/(\d+)\)$/);
+    if (todasParcelas && match) {
+      const original = match[1];
+      const atualParcela = parseInt(match[2], 10);
+      const total = parseInt(match[3], 10);
+
+      for (let k = 1; k <= total; k++) {
+        if (k === atualParcela) continue;
+
+        let mesAlvo = mes + (k - atualParcela);
+        while (mesAlvo > 12) mesAlvo -= 12;
+        while (mesAlvo < 1) mesAlvo += 12;
+
+        const abaAlvo = this.MONTH_NAMES[mesAlvo];
+        const sheetIdAlvo = await this.getSheetId(sheets, abaAlvo);
+        if (sheetIdAlvo === null) continue;
+
+        const resp = await sheets.spreadsheets.values.get({
+          spreadsheetId: this.spreadsheetId,
+          range: `'${abaAlvo}'!A2:A1000`,
+        });
+        const nomes = resp.data.values || [];
+        const alvo = `${original} (${k}/${total})`;
+        const idx = nomes.findIndex((r) => r[0] === alvo);
+        if (idx !== -1) {
+          await this.excluirLinha(sheets, sheetIdAlvo, idx + 2);
+        }
+      }
+    }
+
+    const sheetId = await this.getSheetId(sheets, aba);
+    if (sheetId === null) throw new Error(`Aba "${aba}" não encontrada`);
+    await this.excluirLinha(sheets, sheetId, rowIndex);
+
+    return { success: true };
+  }
+
+  // Edita nome, valor e tipo de um lançamento. Se o mês mudar, a linha é
+  // movida para a aba do novo mês. Parcela e data originais são preservadas.
+  async editarItem(params: {
+    mes: number;
+    novoMes: number;
+    rowIndex: number;
+    nomeOriginal: string;
+    name: string;
+    valor: number;
+    categoria: string;
+  }) {
+    const { mes, novoMes, rowIndex, nomeOriginal, name, valor, categoria } =
+      params;
+    const aba = this.MONTH_NAMES[mes];
+    const abaNova = this.MONTH_NAMES[novoMes];
+    if (!aba || !abaNova) throw new Error('Mês inválido');
+    if (!rowIndex || rowIndex < 2) throw new Error('Linha inválida');
+    if (!name || !name.trim()) throw new Error('Nome é obrigatório');
+
+    const sheets = await this.getSheetsInstance();
+
+    const atual = await sheets.spreadsheets.values.get({
+      spreadsheetId: this.spreadsheetId,
+      range: `'${aba}'!A${rowIndex}:E${rowIndex}`,
+    });
+    const linha = atual.data.values?.[0] || [];
+    if (linha[0] !== nomeOriginal) {
+      throw new Error(
+        'A planilha mudou desde a última atualização. Atualize e tente novamente.',
+      );
+    }
+
+    const novaLinha = [
+      name.trim(),
+      linha[1] ?? '',
+      this.parseValor(valor),
+      linha[3] ?? '',
+      this.tipoPlanilha(categoria),
+    ];
+
+    if (novoMes === mes) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range: `'${aba}'!A${rowIndex}:E${rowIndex}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [novaLinha] },
+      });
+      return { success: true };
+    }
+
+    // Mudou de mês: grava na aba nova e só depois apaga a linha antiga
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: this.spreadsheetId,
+      range: `'${abaNova}'!A:E`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [novaLinha] },
+    });
+
+    const sheetId = await this.getSheetId(sheets, aba);
+    if (sheetId === null) throw new Error(`Aba "${aba}" não encontrada`);
+    await this.excluirLinha(sheets, sheetId, rowIndex);
+
+    return { success: true };
+  }
+
   async getRecentes(numeroMes: number, categoria: string) {
     const aba = this.MONTH_NAMES[numeroMes];
     if (!aba) return [];
@@ -147,17 +314,20 @@ export class FinanceService {
 
       const rows = response.data.values || [];
       const transacoes = rows
-        .filter((row) => {
+        // rowIndex é o número da linha na planilha (a leitura começa na linha 2)
+        .map((row, i) => ({ row, rowIndex: i + 2 }))
+        .filter(({ row }) => {
           const nome = row[0];
           const valorRaw = row[2];
           const tipo = String(row[4] ?? '').trim().toLowerCase();
           return nome && valorRaw && tipo === tipoAlvo;
         })
-        .map((row) => ({
+        .map(({ row, rowIndex }) => ({
           name: row[0] as string,
           valor: this.parseValor(row[2]),
           parcela: (row[1] as string) ?? '',
           data: (row[3] as string) ?? '',
+          rowIndex,
         }));
 
       return transacoes.slice(-5).reverse();

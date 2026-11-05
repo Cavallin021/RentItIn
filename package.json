@@ -10,3 +10,4 @@
     "start:frontend": "cd frontend-financas && npm start"
   }
 }
+

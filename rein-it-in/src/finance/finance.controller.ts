@@ -36,6 +36,54 @@ export class FinanceController {
     }
   }
 
+  @Post('editar')
+  async editar(
+    @Body('mes') mes: number,
+    @Body('novoMes') novoMes: number,
+    @Body('rowIndex') rowIndex: number,
+    @Body('nomeOriginal') nomeOriginal: string,
+    @Body('name') name: string,
+    @Body('valor') valor: number,
+    @Body('categoria') categoria: string,
+  ) {
+    try {
+      return await this.financeService.editarItem({
+        mes: Number(mes),
+        novoMes: Number(novoMes ?? mes),
+        rowIndex: Number(rowIndex),
+        nomeOriginal,
+        name,
+        valor,
+        categoria,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Erro ao editar lançamento:', message);
+      throw new InternalServerErrorException(message);
+    }
+  }
+
+  @Post('remover')
+  async remover(
+    @Body('mes') mes: number,
+    @Body('rowIndex') rowIndex: number,
+    @Body('nome') nome: string,
+    @Body('todasParcelas') todasParcelas?: boolean,
+  ) {
+    try {
+      return await this.financeService.removerItem(
+        Number(mes),
+        Number(rowIndex),
+        nome,
+        Boolean(todasParcelas),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Erro ao remover lançamento:', message);
+      throw new InternalServerErrorException(message);
+    }
+  }
+
   @Get('meses-disponiveis')
   getMesesDisponiveis() {
     return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
