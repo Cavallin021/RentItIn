@@ -170,15 +170,9 @@ export class FinanceService {
     });
   }
 
-  // Exclui a linha `rowIndex` da aba do mês. Só exclui se o nome da linha
-  // ainda for o mesmo (protege contra a planilha ter mudado desde a listagem).
-  // Com `todasParcelas`, também exclui as outras parcelas nos outros meses.
-  async removerItem(
-    mes: number,
-    rowIndex: number,
-    nome: string,
-    todasParcelas = false,
-  ) {
+  // Exclui um lançamento.
+  // Regra do projeto: se for parcelado, SEMPRE exclui todas as parcelas juntas em todos os meses!
+  async removerItem(mes: number, rowIndex: number, nome: string) {
     const aba = this.MONTH_NAMES[mes];
     if (!aba) throw new Error('Mês inválido');
     if (!rowIndex || rowIndex < 2) throw new Error('Linha inválida');
@@ -189,19 +183,43 @@ export class FinanceService {
       spreadsheetId: this.spreadsheetId,
       range: `'${aba}'!A${rowIndex}:E${rowIndex}`,
     });
-    const nomeNaLinha = atual.data.values?.[0]?.[0];
-    if (nomeNaLinha !== nome) {
+    const linha = atual.data.values?.[0] || [];
+    const nomeNaLinha = String(linha[0] ?? '').trim();
+    if (
+      nome &&
+      nomeNaLinha &&
+      nomeNaLinha.toLowerCase() !== String(nome).trim().toLowerCase()
+    ) {
       throw new Error(
         'A planilha mudou desde a última atualização. Atualize e tente novamente.',
       );
     }
 
-    // Outras parcelas ("Nome (k/N)") em outros meses
-    const match = nome.match(/^(.*) \((\d+)\/(\d+)\)$/);
-    if (todasParcelas && match) {
-      const original = match[1];
-      const atualParcela = parseInt(match[2], 10);
-      const total = parseInt(match[3], 10);
+    const colunaParcela = String(linha[1] ?? '').trim();
+    const matchColParcela = colunaParcela.match(/^(\d+)\/(\d+)$/);
+    const matchNomeParcela = String(nomeNaLinha || nome).match(
+      /^(.*?)\s*\((\d+)\/(\d+)\)$/,
+    );
+
+    let atualParcela: number | null = null;
+    let total: number | null = null;
+    let original = nomeNaLinha || nome;
+
+    if (matchColParcela) {
+      atualParcela = parseInt(matchColParcela[1], 10);
+      total = parseInt(matchColParcela[2], 10);
+      original = matchNomeParcela
+        ? matchNomeParcela[1].trim()
+        : (nomeNaLinha || nome).replace(/\s*\(\d+\/\d+\)$/, '').trim();
+    } else if (matchNomeParcela) {
+      original = matchNomeParcela[1].trim();
+      atualParcela = parseInt(matchNomeParcela[2], 10);
+      total = parseInt(matchNomeParcela[3], 10);
+    }
+
+    // Se for parcelado, exclui todas as outras parcelas nos outros meses
+    if (atualParcela !== null && total !== null && total > 1) {
+      const originalLower = original.toLowerCase();
 
       for (let k = 1; k <= total; k++) {
         if (k === atualParcela) continue;
@@ -214,24 +232,91 @@ export class FinanceService {
         const sheetIdAlvo = await this.getSheetId(sheets, abaAlvo);
         if (sheetIdAlvo === null) continue;
 
-        const resp = await sheets.spreadsheets.values.get({
-          spreadsheetId: this.spreadsheetId,
-          range: `'${abaAlvo}'!A2:A1000`,
-        });
-        const nomes = resp.data.values || [];
-        const alvo = `${original} (${k}/${total})`;
-        const idx = nomes.findIndex((r) => r[0] === alvo);
-        if (idx !== -1) {
-          await this.excluirLinha(sheets, sheetIdAlvo, idx + 2);
+        try {
+          const resp = await sheets.spreadsheets.values.get({
+            spreadsheetId: this.spreadsheetId,
+            range: `'${abaAlvo}'!A2:B1000`,
+          });
+          const rows = resp.data.values || [];
+          const alvo = `${originalLower} (${k}/${total})`;
+          const alvoParc = `${k}/${total}`;
+
+          const idx = rows.findIndex((r) => {
+            const rNome = String(r[0] || '').trim().toLowerCase();
+            const rParc = String(r[1] || '').trim();
+            if (
+              rParc === alvoParc &&
+              (rNome === alvo ||
+                rNome === originalLower ||
+                rNome.startsWith(originalLower))
+            ) {
+              return true;
+            }
+            if (rNome === alvo) return true;
+            return false;
+          });
+
+          if (idx !== -1) {
+            await this.excluirLinha(sheets, sheetIdAlvo, idx + 2);
+          }
+        } catch (err) {
+          console.error(
+            `Erro ao excluir parcela ${k}/${total} em ${abaAlvo}:`,
+            err,
+          );
         }
       }
     }
 
+    // Exclui a linha da aba do mês atual
     const sheetId = await this.getSheetId(sheets, aba);
     if (sheetId === null) throw new Error(`Aba "${aba}" não encontrada`);
     await this.excluirLinha(sheets, sheetId, rowIndex);
 
     return { success: true };
+  }
+
+  // Limpa apenas o mês selecionado, sem interferir nos outros meses.
+  async limparMes(mes: number, senhaFornecida: string) {
+    const aba = this.MONTH_NAMES[mes];
+    if (!aba) throw new Error('Mês inválido');
+
+    const sheets = await this.getSheetsInstance();
+
+    let senhaValida = false;
+    const senhaEnv = process.env.ADMIN_PASSWORD;
+
+    if (senhaEnv && senhaFornecida.trim() === senhaEnv.trim()) {
+      senhaValida = true;
+    } else {
+      try {
+        const configResp = await sheets.spreadsheets.values.get({
+          spreadsheetId: this.spreadsheetId,
+          range: 'config!B1',
+        });
+        const senhaPlanilha = configResp.data.values?.[0]?.[0];
+        if (
+          senhaPlanilha &&
+          String(senhaPlanilha).trim() === senhaFornecida.trim()
+        ) {
+          senhaValida = true;
+        }
+      } catch (e) {
+        // Aba config pode não existir
+      }
+    }
+
+    if (!senhaValida) {
+      throw new Error('Senha administrativa incorreta');
+    }
+
+    // Limpa permanentemente todos os lançamentos apenas da aba do mês selecionado
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: this.spreadsheetId,
+      range: `'${aba}'!A2:E`,
+    });
+
+    return { success: true, message: `Aba de ${aba} limpa com sucesso!` };
   }
 
   // Edita nome, valor e tipo de um lançamento. Se o mês mudar, a linha é
@@ -270,7 +355,12 @@ export class FinanceService {
       range: `'${aba}'!A${rowIndex}:E${rowIndex}`,
     });
     const linha = atual.data.values?.[0] || [];
-    if (linha[0] !== nomeOriginal) {
+    const nomeNaLinha = String(linha[0] ?? '').trim();
+    if (
+      nomeOriginal &&
+      nomeNaLinha &&
+      nomeNaLinha.toLowerCase() !== String(nomeOriginal).trim().toLowerCase()
+    ) {
       throw new Error(
         'A planilha mudou desde a última atualização. Atualize e tente novamente.',
       );
@@ -278,24 +368,24 @@ export class FinanceService {
 
     const colunaParcela = String(linha[1] ?? '').trim();
     const matchColParcela = colunaParcela.match(/^(\d+)\/(\d+)$/);
-    const matchNomeParcela = String(nomeOriginal).match(/^(.*?)\s*\((\d+)\/(\d+)\)$/);
+    const matchNomeParcela = String(nomeNaLinha || nomeOriginal).match(
+      /^(.*?)\s*\((\d+)\/(\d+)\)$/,
+    );
 
     let atualParcela: number | null = null;
     let totalParcelas: number | null = null;
-    let nomeBaseOriginal = nomeOriginal;
+    let nomeBaseOriginal = nomeNaLinha || nomeOriginal;
 
     if (matchColParcela) {
       atualParcela = parseInt(matchColParcela[1], 10);
       totalParcelas = parseInt(matchColParcela[2], 10);
+      nomeBaseOriginal = matchNomeParcela
+        ? matchNomeParcela[1].trim()
+        : (nomeNaLinha || nomeOriginal).replace(/\s*\(\d+\/\d+\)$/, '').trim();
     } else if (matchNomeParcela) {
+      nomeBaseOriginal = matchNomeParcela[1].trim();
       atualParcela = parseInt(matchNomeParcela[2], 10);
       totalParcelas = parseInt(matchNomeParcela[3], 10);
-    }
-
-    if (matchNomeParcela) {
-      nomeBaseOriginal = matchNomeParcela[1].trim();
-    } else {
-      nomeBaseOriginal = nomeOriginal.replace(/\s*\(\d+\/\d+\)$/, '').trim();
     }
 
     const novoNomeDigitado = name.trim();
@@ -346,6 +436,8 @@ export class FinanceService {
       totalParcelas !== null &&
       atualParcela < totalParcelas
     ) {
+      const baseOriginalLower = nomeBaseOriginal.toLowerCase();
+
       for (let p = atualParcela + 1; p <= totalParcelas; p++) {
         let mesAlvo = mes + (p - atualParcela);
         while (mesAlvo > 12) mesAlvo -= 12;
@@ -360,20 +452,23 @@ export class FinanceService {
             range: `'${abaAlvo}'!A2:E1000`,
           });
           const rows = resp.data.values || [];
+          const alvoParc = `${p}/${totalParcelas}`;
+          const alvoNome = `${baseOriginalLower} (${p}/${totalParcelas})`;
 
           const targetIdx = rows.findIndex((r) => {
-            const rNome = String(r[0] || '').trim();
+            const rNome = String(r[0] || '').trim().toLowerCase();
             const rParc = String(r[1] || '').trim();
-            const esperadoNome = `${nomeBaseOriginal} (${p}/${totalParcelas})`;
-            const esperadoParc = `${p}/${totalParcelas}`;
 
-            if (
-              rParc === esperadoParc &&
-              (rNome === esperadoNome || rNome.startsWith(nomeBaseOriginal))
-            ) {
-              return true;
+            if (rParc === alvoParc) {
+              if (
+                rNome === alvoNome ||
+                rNome === baseOriginalLower ||
+                rNome.startsWith(baseOriginalLower)
+              ) {
+                return true;
+              }
             }
-            if (rNome === esperadoNome) {
+            if (rNome === alvoNome) {
               return true;
             }
             return false;
@@ -382,7 +477,9 @@ export class FinanceService {
           if (targetIdx !== -1) {
             const rowNum = targetIdx + 2;
             const rowAntiga = rows[targetIdx];
-            const nomeFuturo = `${novoNomeBase} (${p}/${totalParcelas})`;
+            const nomeFuturo = matchNomeParcela
+              ? `${novoNomeBase} (${p}/${totalParcelas})`
+              : novoNomeBase;
             const linhaFuturaAtualizada = [
               nomeFuturo,
               rowAntiga[1] || `${p}/${totalParcelas}`,
@@ -431,7 +528,9 @@ export class FinanceService {
           const nome = row[0];
           const valorRaw = row[2];
           const tipo = String(row[4] ?? '').trim().toLowerCase();
-          return nome && valorRaw && tipo === tipoAlvo;
+          // Linhas sem tipo na planilha são tratadas como Crédito (Lenicard)
+          const tipoEfetivo = tipo || 'crédito';
+          return nome && valorRaw && tipoEfetivo === tipoAlvo;
         })
         .map(({ row, rowIndex }) => ({
           name: row[0] as string,
@@ -441,7 +540,7 @@ export class FinanceService {
           rowIndex,
         }));
 
-      return transacoes.slice(-5).reverse();
+      return transacoes.reverse();
     } catch (error) {
       return [];
     }

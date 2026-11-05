@@ -70,18 +70,30 @@ export class FinanceController {
     @Body('mes') mes: number,
     @Body('rowIndex') rowIndex: number,
     @Body('nome') nome: string,
-    @Body('todasParcelas') todasParcelas?: boolean,
   ) {
     try {
       return await this.financeService.removerItem(
         Number(mes),
         Number(rowIndex),
         nome,
-        Boolean(todasParcelas),
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('Erro ao remover lançamento:', message);
+      throw new InternalServerErrorException(message);
+    }
+  }
+
+  @Post('limpar')
+  async limpar(
+    @Body('mes') mes: number,
+    @Body('senha') senha: string,
+  ) {
+    try {
+      return await this.financeService.limparMes(Number(mes), String(senha || ''));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Erro ao limpar mês:', message);
       throw new InternalServerErrorException(message);
     }
   }

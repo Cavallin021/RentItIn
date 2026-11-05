@@ -128,6 +128,8 @@ export default function App() {
   // Limpar Mês states (Page 5 of PDF)
   const [mesLimpar, setMesLimpar] = useState(1);
   const [senhaLimpar, setSenhaLimpar] = useState("");
+  const [loadingLimpar, setLoadingLimpar] = useState(false);
+  const [limparError, setLimparError] = useState("");
 
   // Dashboard Accordion & Filter states
   const [showChart, setShowChart] = useState(true);
@@ -320,14 +322,14 @@ export default function App() {
   };
 
   // Exclusão em duas etapas: o primeiro toque pede confirmação, o segundo exclui.
-  // `modo` é "uma" (só esta linha) ou "todas" (todas as parcelas).
-  const handleExcluir = async (modo) => {
+  // Regra: apagar um lançamento necessariamente apaga todas as parcelas juntas.
+  const handleExcluir = async () => {
     if (!selectedTransaction || !selectedTransaction.rowIndex) {
       setDeleteError("Não foi possível identificar a linha. Atualize a tela.");
       return;
     }
-    if (deleteConfirm !== modo) {
-      setDeleteConfirm(modo);
+    if (!deleteConfirm) {
+      setDeleteConfirm(true);
       return;
     }
     setLoadingDelete(true);
@@ -337,18 +339,40 @@ export default function App() {
         mes: seletorMes,
         rowIndex: selectedTransaction.rowIndex,
         nome: selectedTransaction.name,
-        todasParcelas: modo === "todas",
       });
       setVisibleEdit(false);
       setSelectedTransaction(null);
-      setDeleteConfirm(null);
+      setDeleteConfirm(false);
       loadTotal();
     } catch (e) {
       const msg = e?.response?.data?.message || "Não foi possível excluir.";
       setDeleteError(String(msg));
-      setDeleteConfirm(null);
+      setDeleteConfirm(false);
     } finally {
       setLoadingDelete(false);
+    }
+  };
+
+  const handleConfirmarLimpeza = async () => {
+    if (!senhaLimpar.trim()) {
+      setLimparError("Insira a senha.");
+      return;
+    }
+    setLoadingLimpar(true);
+    setLimparError("");
+    try {
+      await axios.post(`${API_URL}/limpar`, {
+        mes: mesLimpar,
+        senha: senhaLimpar,
+      });
+      setVisibleLimpar(false);
+      setSenhaLimpar("");
+      loadTotal();
+    } catch (e) {
+      const msg = e?.response?.data?.message || "Senha incorreta ou erro ao limpar.";
+      setLimparError(String(msg));
+    } finally {
+      setLoadingLimpar(false);
     }
   };
 
@@ -2328,68 +2352,34 @@ export default function App() {
 
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => handleExcluir("uma")}
+              onPress={handleExcluir}
               disabled={loadingDelete}
               style={[
                 styles.modalDeleteBtn,
                 {
                   backgroundColor:
-                    deleteConfirm === "uma" ? colors.rose : colors.roseSoft,
+                    deleteConfirm ? colors.rose : colors.roseSoft,
                   opacity: loadingDelete ? 0.6 : 1,
                 },
               ]}
             >
-              {loadingDelete && deleteConfirm === "uma" ? (
+              {loadingDelete ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <Text
                   style={[
                     styles.modalDeleteBtnText,
                     {
-                      color: deleteConfirm === "uma" ? "#FFFFFF" : colors.roseDark,
+                      color: deleteConfirm ? "#FFFFFF" : colors.roseDark,
                     },
                   ]}
                 >
-                  {deleteConfirm === "uma"
+                  {deleteConfirm
                     ? "Toque novamente para confirmar"
-                    : /\/(\d+)$/.test(selectedTransaction?.parcela || "") &&
-                      parseInt(selectedTransaction.parcela.split("/")[1], 10) > 1
-                    ? "🗑 Excluir só esta parcela"
                     : "🗑 Excluir Lançamento"}
                 </Text>
               )}
             </TouchableOpacity>
-
-            {/\/(\d+)$/.test(selectedTransaction?.parcela || "") &&
-            parseInt(selectedTransaction.parcela.split("/")[1], 10) > 1 ? (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => handleExcluir("todas")}
-                disabled={loadingDelete}
-                style={[
-                  styles.modalDeleteBtn,
-                  {
-                    backgroundColor:
-                      deleteConfirm === "todas" ? colors.rose : colors.roseSoft,
-                    opacity: loadingDelete ? 0.6 : 1,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.modalDeleteBtnText,
-                    {
-                      color:
-                        deleteConfirm === "todas" ? "#FFFFFF" : colors.roseDark,
-                    },
-                  ]}
-                >
-                  {deleteConfirm === "todas"
-                    ? "Toque novamente para confirmar"
-                    : "🗑 Excluir todas as parcelas"}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
           </Modal>
 
           {/* MODAL 3: LIMPAR MÊS (Page 5 of PDF) */}
@@ -2557,15 +2547,37 @@ export default function App() {
               />
             </View>
 
+            {limparError ? (
+              <Text
+                style={{
+                  color: colors.roseDark,
+                  fontSize: 12,
+                  textAlign: "center",
+                  marginTop: 10,
+                }}
+              >
+                {limparError}
+              </Text>
+            ) : null}
+
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => setVisibleLimpar(false)}
+              onPress={handleConfirmarLimpeza}
+              disabled={loadingLimpar}
               style={[
                 styles.modalPrimaryBtn,
-                { backgroundColor: colors.rose, marginTop: 20 },
+                {
+                  backgroundColor: colors.rose,
+                  marginTop: 20,
+                  opacity: loadingLimpar ? 0.6 : 1,
+                },
               ]}
             >
-              <Text style={styles.modalPrimaryBtnText}>Confirmar Exclusão</Text>
+              {loadingLimpar ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.modalPrimaryBtnText}>Confirmar Exclusão</Text>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity
