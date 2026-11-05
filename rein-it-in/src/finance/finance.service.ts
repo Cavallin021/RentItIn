@@ -235,7 +235,8 @@ export class FinanceService {
   }
 
   // Edita nome, valor e tipo de um lançamento. Se o mês mudar, a linha é
-  // movida para a aba do novo mês. Parcela e data originais são preservadas.
+  // movida para a aba do novo mês. Se for parcelado e atualizarFuturas for true,
+  // atualiza também as parcelas dos meses futuros com o novo valor/nome/categoria.
   async editarItem(params: {
     mes: number;
     novoMes: number;
@@ -244,9 +245,18 @@ export class FinanceService {
     name: string;
     valor: number;
     categoria: string;
+    atualizarFuturas?: boolean;
   }) {
-    const { mes, novoMes, rowIndex, nomeOriginal, name, valor, categoria } =
-      params;
+    const {
+      mes,
+      novoMes,
+      rowIndex,
+      nomeOriginal,
+      name,
+      valor,
+      categoria,
+      atualizarFuturas = true,
+    } = params;
     const aba = this.MONTH_NAMES[mes];
     const abaNova = this.MONTH_NAMES[novoMes];
     if (!aba || !abaNova) throw new Error('Mês inválido');
@@ -266,12 +276,46 @@ export class FinanceService {
       );
     }
 
+    const colunaParcela = String(linha[1] ?? '').trim();
+    const matchColParcela = colunaParcela.match(/^(\d+)\/(\d+)$/);
+    const matchNomeParcela = String(nomeOriginal).match(/^(.*?)\s*\((\d+)\/(\d+)\)$/);
+
+    let atualParcela: number | null = null;
+    let totalParcelas: number | null = null;
+    let nomeBaseOriginal = nomeOriginal;
+
+    if (matchColParcela) {
+      atualParcela = parseInt(matchColParcela[1], 10);
+      totalParcelas = parseInt(matchColParcela[2], 10);
+    } else if (matchNomeParcela) {
+      atualParcela = parseInt(matchNomeParcela[2], 10);
+      totalParcelas = parseInt(matchNomeParcela[3], 10);
+    }
+
+    if (matchNomeParcela) {
+      nomeBaseOriginal = matchNomeParcela[1].trim();
+    } else {
+      nomeBaseOriginal = nomeOriginal.replace(/\s*\(\d+\/\d+\)$/, '').trim();
+    }
+
+    const novoNomeDigitado = name.trim();
+    const matchNovoNome = novoNomeDigitado.match(/^(.*?)\s*\(\d+\/\d+\)$/);
+    const novoNomeBase = matchNovoNome ? matchNovoNome[1].trim() : novoNomeDigitado;
+
+    const nomeFinalAtual =
+      atualParcela && totalParcelas && totalParcelas > 1
+        ? `${novoNomeBase} (${atualParcela}/${totalParcelas})`
+        : novoNomeDigitado;
+
+    const valorNumerico = this.parseValor(valor);
+    const tipoFinal = this.tipoPlanilha(categoria);
+
     const novaLinha = [
-      name.trim(),
+      nomeFinalAtual,
       linha[1] ?? '',
-      this.parseValor(valor),
+      valorNumerico,
       linha[3] ?? '',
-      this.tipoPlanilha(categoria),
+      tipoFinal,
     ];
 
     if (novoMes === mes) {
@@ -281,20 +325,87 @@ export class FinanceService {
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: [novaLinha] },
       });
-      return { success: true };
+    } else {
+      // Mudou de mês: grava na aba nova e só depois apaga a linha antiga
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: this.spreadsheetId,
+        range: `'${abaNova}'!A:E`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [novaLinha] },
+      });
+
+      const sheetId = await this.getSheetId(sheets, aba);
+      if (sheetId === null) throw new Error(`Aba "${aba}" não encontrada`);
+      await this.excluirLinha(sheets, sheetId, rowIndex);
     }
 
-    // Mudou de mês: grava na aba nova e só depois apaga a linha antiga
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: this.spreadsheetId,
-      range: `'${abaNova}'!A:E`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [novaLinha] },
-    });
+    // Se for parcelado e solicitado atualizar parcelas futuras:
+    if (
+      atualizarFuturas &&
+      atualParcela !== null &&
+      totalParcelas !== null &&
+      atualParcela < totalParcelas
+    ) {
+      for (let p = atualParcela + 1; p <= totalParcelas; p++) {
+        let mesAlvo = mes + (p - atualParcela);
+        while (mesAlvo > 12) mesAlvo -= 12;
+        while (mesAlvo < 1) mesAlvo += 12;
 
-    const sheetId = await this.getSheetId(sheets, aba);
-    if (sheetId === null) throw new Error(`Aba "${aba}" não encontrada`);
-    await this.excluirLinha(sheets, sheetId, rowIndex);
+        const abaAlvo = this.MONTH_NAMES[mesAlvo];
+        if (!abaAlvo) continue;
+
+        try {
+          const resp = await sheets.spreadsheets.values.get({
+            spreadsheetId: this.spreadsheetId,
+            range: `'${abaAlvo}'!A2:E1000`,
+          });
+          const rows = resp.data.values || [];
+
+          const targetIdx = rows.findIndex((r) => {
+            const rNome = String(r[0] || '').trim();
+            const rParc = String(r[1] || '').trim();
+            const esperadoNome = `${nomeBaseOriginal} (${p}/${totalParcelas})`;
+            const esperadoParc = `${p}/${totalParcelas}`;
+
+            if (
+              rParc === esperadoParc &&
+              (rNome === esperadoNome || rNome.startsWith(nomeBaseOriginal))
+            ) {
+              return true;
+            }
+            if (rNome === esperadoNome) {
+              return true;
+            }
+            return false;
+          });
+
+          if (targetIdx !== -1) {
+            const rowNum = targetIdx + 2;
+            const rowAntiga = rows[targetIdx];
+            const nomeFuturo = `${novoNomeBase} (${p}/${totalParcelas})`;
+            const linhaFuturaAtualizada = [
+              nomeFuturo,
+              rowAntiga[1] || `${p}/${totalParcelas}`,
+              valorNumerico,
+              rowAntiga[3] || '',
+              tipoFinal,
+            ];
+
+            await sheets.spreadsheets.values.update({
+              spreadsheetId: this.spreadsheetId,
+              range: `'${abaAlvo}'!A${rowNum}:E${rowNum}`,
+              valueInputOption: 'USER_ENTERED',
+              requestBody: { values: [linhaFuturaAtualizada] },
+            });
+          }
+        } catch (err) {
+          console.error(
+            `Erro ao atualizar parcela futura ${p}/${totalParcelas} na aba ${abaAlvo}:`,
+            err,
+          );
+        }
+      }
+    }
 
     return { success: true };
   }

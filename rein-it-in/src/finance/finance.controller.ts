@@ -45,6 +45,7 @@ export class FinanceController {
     @Body('name') name: string,
     @Body('valor') valor: number,
     @Body('categoria') categoria: string,
+    @Body('atualizarFuturas') atualizarFuturas?: boolean,
   ) {
     try {
       return await this.financeService.editarItem({
@@ -55,6 +56,7 @@ export class FinanceController {
         name,
         valor,
         categoria,
+        atualizarFuturas: atualizarFuturas !== false,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

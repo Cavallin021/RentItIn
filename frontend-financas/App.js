@@ -123,6 +123,7 @@ export default function App() {
   const [editCategoria, setEditCategoria] = useState("Débito");
   const [editMes, setEditMes] = useState(1);
   const [editParcelas, setEditParcelas] = useState(1);
+  const [atualizarFuturas, setAtualizarFuturas] = useState(true);
 
   // Limpar Mês states (Page 5 of PDF)
   const [mesLimpar, setMesLimpar] = useState(1);
@@ -275,6 +276,7 @@ export default function App() {
     setSelectedTransaction(item);
     setDeleteConfirm(null);
     setDeleteError("");
+    setAtualizarFuturas(true);
     setEditName(item.name || "");
     setEditValor(item.valor !== undefined ? Number(item.valor).toFixed(2) : "");
     setEditCategoria(item.categoria || "Débito");
@@ -304,6 +306,7 @@ export default function App() {
         name: editName.trim(),
         valor: numericValor,
         categoria: editCategoria,
+        atualizarFuturas,
       });
       setVisibleEdit(false);
       setSelectedTransaction(null);
@@ -2219,52 +2222,76 @@ export default function App() {
                 <Text
                   style={[styles.fieldLabel, { color: colors.textSecondary }]}
                 >
-                  PARCELAS
+                  PARCELA
                 </Text>
                 <View
                   style={[
-                    styles.pickerContainer,
+                    styles.cleanInputWrap,
                     {
-                      backgroundColor: colors.inputBg,
+                      backgroundColor: colors.surfaceSubtle,
                       borderColor: colors.border,
+                      alignItems: "center",
                     },
                   ]}
                 >
-                  <Picker
-                    selectedValue={editParcelas}
-                    onValueChange={setEditParcelas}
+                  <Text
                     style={{
                       color: colors.textPrimary,
-                      backgroundColor: colors.inputBg,
+                      fontWeight: "700",
+                      fontSize: 14,
                     }}
-                    dropdownIconColor={colors.textSecondary}
                   >
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((num) => (
-                      <Picker.Item
-                        key={num}
-                        label={num === 1 ? "1x (À vista)" : `${num}x`}
-                        value={num}
-                        style={{
-                          color: colors.textPrimary,
-                          backgroundColor: colors.surface,
-                        }}
-                      />
-                    ))}
-                  </Picker>
+                    {selectedTransaction?.parcela || "1/1"}
+                  </Text>
                 </View>
               </View>
             </View>
 
-            <Text
-              style={{
-                color: colors.textMuted,
-                fontSize: 11,
-                textAlign: "center",
-                marginTop: 12,
-              }}
-            >
-              A quantidade de parcelas não é alterada na edição.
-            </Text>
+            {Boolean(
+              selectedTransaction?.parcela &&
+                selectedTransaction.parcela.includes("/") &&
+                !selectedTransaction.parcela.endsWith("/1")
+            ) && (
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  backgroundColor: colors.surfaceSubtle,
+                  borderRadius: 10,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  marginTop: 12,
+                }}
+              >
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text
+                    style={{
+                      color: colors.textPrimary,
+                      fontWeight: "700",
+                      fontSize: 13,
+                    }}
+                  >
+                    Atualizar parcelas futuras
+                  </Text>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                      marginTop: 2,
+                    }}
+                  >
+                    Aplica o novo valor nos meses seguintes
+                  </Text>
+                </View>
+                <Switch
+                  value={atualizarFuturas}
+                  onValueChange={setAtualizarFuturas}
+                  trackColor={{ false: "#CBD5E1", true: colors.primary }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+            )}
 
             <TouchableOpacity
               activeOpacity={0.85}
