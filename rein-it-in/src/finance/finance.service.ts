@@ -1,12 +1,33 @@
 import { Injectable } from '@nestjs/common';
 import { google } from 'googleapis';
-import * as path from 'path';
 import 'dotenv/config';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 
 @Injectable()
 export class FinanceService {
   private spreadsheetId = process.env.SHEET_ID;
+
+  // Uma aba por mês. As colunas de cada aba são: Nome | Parcela | Valor | Data | Tipo
+  private readonly MONTH_NAMES: { [key: number]: string } = {
+    1: 'Janeiro',
+    2: 'Fevereiro',
+    3: 'Março',
+    4: 'Abril',
+    5: 'Maio',
+    6: 'Junho',
+    7: 'Julho',
+    8: 'Agosto',
+    9: 'Setembro',
+    10: 'Outubro',
+    11: 'Novembro',
+    12: 'Dezembro',
+  };
+
+  // O app usa "Lenicard", mas na planilha o tipo do cartão de crédito é "Crédito".
+  private tipoPlanilha(categoria: string): string {
+    const c = categoria.trim();
+    return c.toLowerCase() === 'lenicard' ? 'Crédito' : c;
+  }
 
   private async getSheetsInstance() {
     const jsonString = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
@@ -29,174 +50,115 @@ export class FinanceService {
     return google.sheets({ version: 'v4', auth: authClient });
   }
 
-  async getValorMes(numeroMes: number) {
-    function converterParaNumero(valorString: string): number {
-      const apenasNumeros = valorString.replace(/[^\d-]/g, '');
-      return parseFloat(apenasNumeros) / 100 || 0;
+  // Converte "R$ 1.234,56", "-R$ 1.234,56", "1234.56" ou número para number.
+  private parseValor(val: unknown): number {
+    if (typeof val === 'number') return val;
+    let clean = String(val ?? '')
+      .replace(/R\$\s?/g, '')
+      .trim();
+    if (clean.includes(',')) {
+      clean = clean.replace(/\./g, '').replace(',', '.');
+    } else {
+      const dotCount = (clean.match(/\./g) || []).length;
+      if (dotCount > 1) {
+        clean = clean.replace(/\./g, '');
+      }
     }
+    return parseFloat(clean) || 0;
+  }
+
+  // Lê uma linha da aba "Casa" (B = Janeiro ... M = Dezembro) e devolve
+  // um array de 13 posições, onde o índice é o número do mês (0 não é usado).
+  private async lerLinhaCasa(indiceLinha: number): Promise<{ total: number[] }> {
     const sheets = await this.getSheetsInstance();
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,
-      range: 'A3:Z3',
+      range: 'Casa!A1:N5',
     });
 
-    const primeiraLinha = response.data.values?.[0];
-
-    const total = primeiraLinha
-      ? primeiraLinha.map((item) => converterParaNumero(item))
-      : [];
-
+    const linha = response.data.values?.[indiceLinha] || [];
+    const total = new Array(13).fill(0);
+    for (let mes = 1; mes <= 12; mes++) {
+      total[mes] = this.parseValor(linha[mes]);
+    }
     return { total };
   }
 
+  // Linha 3 da aba Casa: saldo / total geral
+  async getValorMes(numeroMes: number) {
+    return this.lerLinhaCasa(2);
+  }
+
+  // Linha 2 da aba Casa: fatura do cartão (Lenicard)
   async getValorMesLC(numeroMes: number) {
-    function converterParaNumero(valorString: string): number {
-      const apenasNumeros = valorString.replace(/[^\d-]/g, '');
-      return parseFloat(apenasNumeros) / 100 || 0;
-    }
-    const sheets = await this.getSheetsInstance();
-
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: 'A2:Z2',
-    });
-
-    const primeiraLinha = response.data.values?.[0];
-
-    const total = primeiraLinha
-      ? primeiraLinha.map((item) => converterParaNumero(item))
-      : [];
-
-    return { total };
+    return this.lerLinhaCasa(1);
   }
 
   async adicionarItem(dto: CreateTransactionDto) {
     const sheets = await this.getSheetsInstance();
-    const getLetra = (num: number) => {
-      let letra = '',
-        n = num;
-      while (n > 0) {
-        n--;
-        letra = String.fromCharCode(65 + (n % 26)) + letra;
-        n = Math.floor(n / 26);
-      }
-      return letra;
-    };
 
-    const aba = dto.categoria.trim();
     const numParcelas = dto.parcelas && dto.parcelas > 0 ? dto.parcelas : 1;
-
-    // Coluna de Valores do grupo (ex: 2, 4, 6...)
-    const colValor = dto.grupoColuna * 2;
-    const letraColValor = getLetra(colValor);
-
-    // 1. Lemos APENAS a coluna de valores para achar a última linha
-    const rangeBusca = `'${aba}'!${letraColValor}1:${letraColValor}1000`;
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range: rangeBusca,
+    const mesInicial = dto.grupoColuna;
+    const tipo = this.tipoPlanilha(dto.categoria);
+    const dataRegistro = new Date().toLocaleString('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
     });
 
-    // 2. A primeira linha livre será o tamanho do array + 1
-    const rows = response.data.values ? response.data.values.length : 0;
-    const linhaAlvo = rows + 1;
-
-    // 3. Cálculo da coluna de Nomes (coluna vizinha à esquerda do valor)
-    const colName = colValor - 1;
-
-    // 4. Preenchimento horizontal na linha alvo
-    let colAtual = colName;
-
-    const parseValor = (val: unknown): number => {
-      if (typeof val === 'number') return val;
-      let clean = String(val)
-        .replace(/R\$\s?/g, '')
-        .trim();
-      if (clean.includes(',')) {
-        clean = clean.replace(/\./g, '').replace(',', '.');
-      } else {
-        const dotCount = (clean.match(/\./g) || []).length;
-        if (dotCount > 1) {
-          clean = clean.replace(/\./g, '');
-        }
-      }
-      return parseFloat(clean) || 0;
-    };
-
-    const valorParcelado = parseValor(dto.valor);
+    // Valor como número puro (evita problemas de interpretação de vírgula/ponto)
+    const valorParcela = this.parseValor(dto.valor);
 
     for (let i = 0; i < numParcelas; i++) {
+      let mesAlvo = mesInicial + i;
+      while (mesAlvo > 12) mesAlvo -= 12;
+
+      const aba = this.MONTH_NAMES[mesAlvo];
+      if (!aba) continue;
+
       const nomeParcelado =
         numParcelas > 1 ? `${dto.name} (${i + 1}/${numParcelas})` : dto.name;
+      const parcelaStr = `${i + 1}/${numParcelas}`;
 
-      // Atualiza Nome (na mesma linha)
-      await sheets.spreadsheets.values.update({
+      await sheets.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,
-        range: `'${aba}'!${getLetra(colAtual)}${linhaAlvo}`,
+        range: `'${aba}'!A:E`,
         valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [[nomeParcelado || '']] },
+        requestBody: {
+          values: [[nomeParcelado, parcelaStr, valorParcela, dataRegistro, tipo]],
+        },
       });
-
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: this.spreadsheetId,
-        range: `'${aba}'!${getLetra(colAtual + 1)}${linhaAlvo}`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [[valorParcelado]] },
-      });
-
-      colAtual += 2;
     }
 
     return { success: true };
   }
 
   async getRecentes(numeroMes: number, categoria: string) {
-    const sheets = await this.getSheetsInstance();
-    const getLetra = (num: number) => {
-      let letra = '',
-        n = num;
-      while (n > 0) {
-        n--;
-        letra = String.fromCharCode(65 + (n % 26)) + letra;
-        n = Math.floor(n / 26);
-      }
-      return letra;
-    };
+    const aba = this.MONTH_NAMES[numeroMes];
+    if (!aba) return [];
 
-    const aba = categoria.trim();
-    const colValor = numeroMes * 2;
-    const colName = colValor - 1;
-
-    const rangeBusca = `'${aba}'!${getLetra(colName)}4:${getLetra(colValor)}1000`;
+    const tipoAlvo = this.tipoPlanilha(categoria).toLowerCase();
 
     try {
+      const sheets = await this.getSheetsInstance();
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: this.spreadsheetId,
-        range: rangeBusca,
+        range: `'${aba}'!A2:E1000`,
       });
 
       const rows = response.data.values || [];
       const transacoes = rows
-        .map((row) => {
-          const name = row[0];
-          const valorRaw = row[1];
-          if (!name || !valorRaw) return null;
-
-          let clean = valorRaw.replace(/R\$\s?/g, '').trim();
-          if (clean.includes(',')) {
-            clean = clean.replace(/\./g, '').replace(',', '.');
-          } else {
-            const dotCount = (clean.match(/\./g) || []).length;
-            if (dotCount > 1) {
-              clean = clean.replace(/\./g, '');
-            }
-          }
-          const valor = parseFloat(clean) || 0;
-
-          return { name, valor };
+        .filter((row) => {
+          const nome = row[0];
+          const valorRaw = row[2];
+          const tipo = String(row[4] ?? '').trim().toLowerCase();
+          return nome && valorRaw && tipo === tipoAlvo;
         })
-        .filter((item) => item !== null);
+        .map((row) => ({
+          name: row[0] as string,
+          valor: this.parseValor(row[2]),
+          parcela: (row[1] as string) ?? '',
+          data: (row[3] as string) ?? '',
+        }));
 
       return transacoes.slice(-5).reverse();
     } catch (error) {

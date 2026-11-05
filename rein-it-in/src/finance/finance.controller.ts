@@ -1,4 +1,11 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  InternalServerErrorException,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { FinanceService } from './finance.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 
@@ -20,7 +27,13 @@ export class FinanceController {
 
   @Post('adicionar')
   async adicionar(@Body() dto: CreateTransactionDto) {
-    return await this.financeService.adicionarItem(dto);
+    try {
+      return await this.financeService.adicionarItem(dto);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Erro ao adicionar lançamento:', message, dto);
+      throw new InternalServerErrorException(message);
+    }
   }
 
   @Get('meses-disponiveis')
